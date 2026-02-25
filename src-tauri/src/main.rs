@@ -6,6 +6,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 mod ai_processing;
 mod ai_connector;
+mod llm_processing;
 mod culling;
 mod denoising;
 mod exif_processing;
@@ -2737,6 +2738,30 @@ async fn invoke_generative_replace_with_mask_def(
 }
 
 #[tauri::command]
+async fn invoke_llm_edit(
+    prompt: String,
+    current_adjustments: Value,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<Value, String> {
+    let settings = load_settings(app_handle.clone()).unwrap_or_default();
+
+    let api_key = settings
+        .llm_api_key
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(|| {
+            "No Anthropic API key configured. Please add your API key in Settings > AI.".to_string()
+        })?;
+
+    let (base_image, _) = get_full_image_for_processing(&state)
+        .map_err(|e| format!("Failed to access image: {}", e))?;
+
+    llm_processing::invoke_llm_edit(&base_image, &prompt, &current_adjustments, &api_key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_supported_file_types() -> Result<serde_json::Value, String> {
     let raw_extensions: Vec<&str> = crate::formats::RAW_EXTENSIONS
         .iter()
@@ -3822,6 +3847,7 @@ fn main() {
             check_ai_connector_status,
             test_ai_connector_connection,
             invoke_generative_replace_with_mask_def,
+            invoke_llm_edit,
             get_supported_file_types,
             get_log_file_path,
             save_collage,

@@ -341,6 +341,8 @@ pub struct AppSettings {
     pub enable_xmp_sync: Option<bool>,
     #[serde(default)]
     pub create_xmp_if_missing: Option<bool>,
+    #[serde(default)]
+    pub llm_api_key: Option<String>,
 }
 
 fn default_adjustment_visibility() -> HashMap<String, bool> {
@@ -401,6 +403,7 @@ impl Default for AppSettings {
             linear_raw_mode: default_linear_raw_mode(),
             enable_xmp_sync: Some(true),
             create_xmp_if_missing: Some(false),
+            llm_api_key: None,
         }
     }
 }

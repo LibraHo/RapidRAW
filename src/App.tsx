@@ -486,6 +486,7 @@ function App() {
   const [isGeneratingAiMask, setIsGeneratingAiMask] = useState(false);
   const [isAIConnectorConnected, setisAIConnectorConnected] = useState(false);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [isLlmEditing, setIsLlmEditing] = useState(false);
   const [isMaskControlHovered, setIsMaskControlHovered] = useState(false);
   const [libraryScrollTop, setLibraryScrollTop] = useState<number>(0);
   const { showContextMenu } = useContextMenu();
@@ -2277,6 +2278,26 @@ function App() {
     } catch (err) {
       console.error('Failed to calculate auto adjustments:', err);
       setError(`Failed to apply auto adjustments: ${err}`);
+    }
+  };
+
+  const handleLlmEdit = async (prompt: string) => {
+    if (!selectedImage || isLlmEditing) return;
+    setIsLlmEditing(true);
+    try {
+      const llmAdjustments: Partial<Adjustments> = await invoke(Invokes.InvokeLlmEdit, {
+        prompt,
+        currentAdjustments: adjustments,
+      });
+      setAdjustments((prev: Adjustments) => ({
+        ...prev,
+        ...llmAdjustments,
+      }));
+    } catch (err) {
+      console.error('LLM edit failed:', err);
+      setError(`AI Edit failed: ${err}`);
+    } finally {
+      setIsLlmEditing(false);
     }
   };
 
@@ -4714,6 +4735,8 @@ function App() {
                           isWbPickerActive={isWbPickerActive}
                           toggleWbPicker={toggleWbPicker}
                           onDragStateChange={setIsSliderDragging}
+                          onLlmEdit={appSettings?.llmApiKey ? handleLlmEdit : undefined}
+                          isLlmEditing={isLlmEditing}
                         />
                       )}
                       {renderedRightPanel === Panel.Metadata && (

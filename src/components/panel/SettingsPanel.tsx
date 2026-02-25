@@ -262,6 +262,7 @@ export default function SettingsPanel({
 
   const [aiProvider, setAiProvider] = useState(appSettings?.aiProvider || 'cpu');
   const [aiConnectorAddress, setAiConnectorAddress] = useState<string>(appSettings?.aiConnectorAddress || '');
+  const [llmApiKey, setLlmApiKey] = useState<string>(appSettings?.llmApiKey || '');
   const [newShortcut, setNewShortcut] = useState('');
   const [newAiTag, setNewAiTag] = useState('');
 
@@ -289,6 +290,9 @@ export default function SettingsPanel({
     }
     if (appSettings?.aiProvider !== aiProvider) {
       setAiProvider(appSettings?.aiProvider || 'cpu');
+    }
+    if (appSettings?.llmApiKey !== llmApiKey) {
+      setLlmApiKey(appSettings?.llmApiKey || '');
     }
     setProcessingSettings({
       editorPreviewResolution: appSettings?.editorPreviewResolution || 1920,
@@ -1336,6 +1340,29 @@ export default function SettingsPanel({
                         </motion.div>
                       )}
                     </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-surface rounded-xl shadow-md">
+                  <h2 className="text-xl font-semibold mb-2 text-accent">AI Edit Assistant</h2>
+                  <p className="text-sm text-text-secondary mb-6">
+                    Describe the look you want in plain language and Claude will generate adjustment parameters for your photo. Requires an Anthropic API key.
+                  </p>
+                  <div className="space-y-6">
+                    <SettingItem
+                      label="Anthropic API Key"
+                      description="Your Anthropic API key is stored locally and only sent to api.anthropic.com. Get one at console.anthropic.com."
+                    >
+                      <Input
+                        id="llm-api-key"
+                        type="password"
+                        placeholder="sk-ant-..."
+                        value={llmApiKey}
+                        onChange={(e: any) => setLlmApiKey(e.target.value)}
+                        onBlur={() => onSettingsChange({ ...appSettings, llmApiKey: llmApiKey || undefined })}
+                        onKeyDown={(e: any) => e.stopPropagation()}
+                      />
+                    </SettingItem>
                   </div>
                 </div>
 

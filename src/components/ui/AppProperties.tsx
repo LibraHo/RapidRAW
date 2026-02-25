@@ -50,6 +50,7 @@ export enum Invokes {
   ImportFiles = 'import_files',
   InvokeGenerativeReplace = 'invoke_generative_replace',
   InvokeGenerativeReplaseWithMaskDef = 'invoke_generative_replace_with_mask_def',
+  InvokeLlmEdit = 'invoke_llm_edit',
   ListImagesInDir = 'list_images_in_dir',
   ListImagesRecursive = 'list_images_recursive',
   LoadImage = 'load_image',
@@ -151,6 +152,7 @@ export interface AppSettings {
   linearRawMode?: string;
   enableXmpSync?: boolean;
   createXmpIfMissing?: boolean;
+  llmApiKey?: string;
 }
 
 export interface BrushSettings {
