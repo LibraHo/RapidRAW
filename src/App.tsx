@@ -79,6 +79,8 @@ import {
   Coord,
   COPYABLE_ADJUSTMENT_KEYS,
   INITIAL_ADJUSTMENTS,
+  INITIAL_MASK_ADJUSTMENTS,
+  INITIAL_MASK_CONTAINER,
   MaskContainer,
   normalizeLoadedAdjustments,
   PasteMode,
@@ -88,7 +90,7 @@ import { generatePaletteFromImage } from './utils/palette';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import GlobalTooltip from './components/ui/GlobalTooltip';
 import { THEMES, DEFAULT_THEME_ID, ThemeProps } from './utils/themes';
-import { SubMask, ToolType } from './components/panel/right/Masks';
+import { SubMask, ToolType, Mask, SubMaskMode } from './components/panel/right/Masks';
 import {
   EXPORT_TIMEOUT,
   ExportState,
@@ -2285,14 +2287,47 @@ function App() {
     if (!selectedImage || isLlmEditing) return;
     setIsLlmEditing(true);
     try {
-      const llmAdjustments: Partial<Adjustments> = await invoke(Invokes.InvokeLlmEdit, {
-        prompt,
-        currentAdjustments: adjustments,
+      const response: { adjustments: Partial<Adjustments>; masks?: Array<{ name: string; type: string; adjustments: any }> } =
+        await invoke(Invokes.InvokeLlmEdit, {
+          prompt,
+          currentAdjustments: adjustments,
+        });
+
+      const maskTypeToEnum: Record<string, Mask> = {
+        'ai-sky': Mask.AiSky,
+        'ai-subject': Mask.AiSubject,
+        'ai-foreground': Mask.AiForeground,
+      };
+
+      setAdjustments((prev: Adjustments) => {
+        const newMaskContainers: MaskContainer[] = (response.masks ?? [])
+          .filter((m) => maskTypeToEnum[m.type])
+          .map((m) => ({
+            ...INITIAL_MASK_CONTAINER,
+            id: crypto.randomUUID(),
+            name: m.name,
+            adjustments: {
+              ...INITIAL_MASK_ADJUSTMENTS,
+              ...m.adjustments,
+            },
+            subMasks: [
+              {
+                id: crypto.randomUUID(),
+                invert: false,
+                mode: SubMaskMode.Additive,
+                opacity: 100,
+                type: maskTypeToEnum[m.type],
+                visible: true,
+              } as SubMask,
+            ],
+          }));
+
+        return {
+          ...prev,
+          ...response.adjustments,
+          masks: [...prev.masks, ...newMaskContainers],
+        };
       });
-      setAdjustments((prev: Adjustments) => ({
-        ...prev,
-        ...llmAdjustments,
-      }));
     } catch (err) {
       console.error('LLM edit failed:', err);
       setError(`AI Edit failed: ${err}`);

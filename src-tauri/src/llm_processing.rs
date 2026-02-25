@@ -9,41 +9,76 @@ const MAX_IMAGE_DIM: u32 = 1024;
 
 const SYSTEM_PROMPT: &str = r#"You are an expert professional photo editor with deep knowledge of RAW image processing and color science.
 
-Analyze the provided photograph and the user's edit request, then return specific adjustment parameters as a JSON object.
+Analyze the provided photograph and the user's edit request, then return a JSON object describing adjustments to apply.
 
 CRITICAL: Respond ONLY with a valid JSON object. No explanation, no markdown code blocks, no surrounding text — just the raw JSON object itself.
 
-Available parameters (all optional — only include parameters you want to change from their current values):
-- exposure: number from -5 to 5 (overall brightness in stops; 0 = no change)
-- contrast: number from -100 to 100 (tonal contrast)
-- highlights: number from -100 to 100 (negative = recover blown highlights, positive = boost)
-- shadows: number from -100 to 100 (positive = lift shadows to reveal detail, negative = crush)
-- whites: number from -100 to 100 (white point / brightest tone adjustment)
-- blacks: number from -100 to 100 (black point / darkest tone adjustment)
-- brightness: number from -100 to 100 (global midtone brightness offset)
-- temperature: number from -100 to 100 (negative = cooler/more blue, positive = warmer/more orange)
-- tint: number from -100 to 100 (negative = more green, positive = more magenta)
-- saturation: number from -100 to 100 (global color saturation; negative = desaturate toward B&W)
-- vibrance: number from -100 to 100 (smart saturation boost that protects already-saturated colors and skin tones)
-- clarity: number from -100 to 100 (midtone contrast and texture; positive = sharper/punchier, negative = matte/dreamy)
-- dehaze: number from -100 to 100 (positive = remove atmospheric haze/fog, negative = add misty atmosphere)
-- sharpness: number from 0 to 100 (edge sharpening amount)
-- lumaNoiseReduction: number from 0 to 100 (luminance/grain noise reduction)
-- colorNoiseReduction: number from 0 to 100 (color/chroma noise reduction)
-- vignetteAmount: number from -100 to 100 (negative = darken edges to focus attention on center, positive = lighten edges)
-- grainAmount: number from 0 to 100 (analog film grain texture amount)
-- glowAmount: number from 0 to 100 (soft bloom/glow effect diffusing from highlights)
-- halationAmount: number from 0 to 100 (cinematic red/orange glow bleeding around bright highlights, emulates film halation)
-- toneMapper: "basic" or "agx" (rendering algorithm; "agx" produces more filmic, cinematic, naturalistic results with better highlight rolloff)
+## Response Schema
 
-Think carefully about what adjustments will achieve the user's request. Consider:
-- Scene type (portrait, landscape, street, night, golden hour, etc.)
-- Desired mood and aesthetic
-- Technical issues to correct (exposure, white balance, noise, etc.)
-- Stylistic choices (cinematic, vintage, clean/modern, dramatic, etc.)
+Your response must follow this exact schema:
 
-Example response for "make this sunset photo look cinematic and dramatic":
-{"exposure":0.1,"contrast":25,"highlights":-35,"shadows":20,"temperature":20,"tint":5,"vibrance":30,"clarity":15,"vignetteAmount":-35,"grainAmount":12,"halationAmount":25,"toneMapper":"agx"}"#;
+```
+{
+  "adjustments": { ...global adjustment overrides... },
+  "masks": [ ...optional per-region adjustments... ]
+}
+```
+
+### "adjustments" (required, may be empty {})
+Global adjustments applied to the entire image. Only include parameters you want to change:
+
+- exposure: -5 to 5 (overall brightness in stops)
+- contrast: -100 to 100
+- highlights: -100 to 100 (negative = recover blown highlights)
+- shadows: -100 to 100 (positive = lift shadows)
+- whites: -100 to 100 (white point)
+- blacks: -100 to 100 (black point)
+- brightness: -100 to 100 (midtone brightness offset)
+- temperature: -100 to 100 (negative = cooler/blue, positive = warmer/orange)
+- tint: -100 to 100 (negative = green, positive = magenta)
+- saturation: -100 to 100 (negative = desaturate toward B&W)
+- vibrance: -100 to 100 (smart saturation, protects skin tones)
+- clarity: -100 to 100 (midtone contrast; positive = punchy, negative = matte)
+- dehaze: -100 to 100 (positive = remove haze, negative = add atmosphere)
+- sharpness: 0 to 100
+- lumaNoiseReduction: 0 to 100
+- colorNoiseReduction: 0 to 100
+- vignetteAmount: -100 to 100 (negative = darken edges)
+- grainAmount: 0 to 100 (film grain)
+- glowAmount: 0 to 100 (highlight bloom/glow)
+- halationAmount: 0 to 100 (cinematic red glow on highlights, film halation)
+- toneMapper: "basic" or "agx" ("agx" = more filmic/cinematic)
+
+### "masks" (optional array, default [])
+Use masks when different regions of the image need SIGNIFICANTLY DIFFERENT adjustments.
+Common use cases:
+- Sky vs foreground: different exposure, temperature, saturation
+- Portrait subject vs background: selective sharpening, exposure, color
+- Foreground vs background: different haze/clarity treatment
+
+Each mask object:
+```
+{
+  "name": "descriptive name",
+  "type": "ai-sky" | "ai-subject" | "ai-foreground",
+  "adjustments": { ...same parameters as global, excluding vignetteAmount/grainAmount/glowAmount/halationAmount/toneMapper... }
+}
+```
+
+Mask types:
+- "ai-sky": detects sky and clouds — use for blue sky, sunset sky, overcast sky
+- "ai-subject": detects the main subject (person, animal, object) — use for portraits, wildlife
+- "ai-foreground": detects everything in front of the sky — use for landscapes, cityscapes
+
+IMPORTANT: Only add masks when they add real value. Do NOT add masks for uniform edits. Max 2 masks per response.
+
+## Examples
+
+Example 1 — "dramatic landscape with moody sky" (masks are valuable here):
+{"adjustments":{"contrast":20,"highlights":-20,"shadows":15,"vibrance":25,"clarity":10,"vignetteAmount":-25,"toneMapper":"agx"},"masks":[{"name":"Sky","type":"ai-sky","adjustments":{"highlights":-50,"contrast":30,"saturation":20,"temperature":-15}},{"name":"Foreground","type":"ai-foreground","adjustments":{"shadows":25,"clarity":15,"temperature":10}}]}
+
+Example 2 — "portrait, clean and bright" (no mask needed):
+{"adjustments":{"exposure":0.5,"highlights":-20,"shadows":15,"temperature":10,"vibrance":15,"sharpness":30},"masks":[]}"#;
 
 /// Resize image so its longest dimension is at most MAX_IMAGE_DIM, preserving aspect ratio.
 fn resize_for_llm(img: &DynamicImage) -> DynamicImage {
@@ -70,9 +105,10 @@ fn image_to_jpeg_base64(img: &DynamicImage) -> Result<String> {
     Ok(general_purpose::STANDARD.encode(buf.get_ref()))
 }
 
-fn validate_adjustments(adj: &Value) -> Result<()> {
+/// Validate a flat adjustments object (global or per-mask).
+fn validate_adjustment_object(adj: &Value, context: &str) -> Result<()> {
     if !adj.is_object() {
-        return Err(anyhow!("LLM response must be a JSON object"));
+        return Err(anyhow!("{} must be a JSON object", context));
     }
 
     let numeric_params: &[(&str, f64, f64)] = &[
@@ -104,14 +140,21 @@ fn validate_adjustments(adj: &Value) -> Result<()> {
                 Some(n) if n >= *min && n <= *max => {}
                 Some(n) => {
                     return Err(anyhow!(
-                        "Parameter '{}' value {} is out of range [{}, {}]",
+                        "{}: parameter '{}' value {} is out of range [{}, {}]",
+                        context,
                         key,
                         n,
                         min,
                         max
                     ))
                 }
-                None => return Err(anyhow!("Parameter '{}' must be a number", key)),
+                None => {
+                    return Err(anyhow!(
+                        "{}: parameter '{}' must be a number",
+                        context,
+                        key
+                    ))
+                }
             }
         }
     }
@@ -119,17 +162,79 @@ fn validate_adjustments(adj: &Value) -> Result<()> {
     if let Some(tm) = adj.get("toneMapper") {
         match tm.as_str() {
             Some("basic") | Some("agx") => {}
-            _ => return Err(anyhow!("toneMapper must be \"basic\" or \"agx\"")),
+            _ => return Err(anyhow!("{}: toneMapper must be \"basic\" or \"agx\"", context)),
         }
     }
 
     Ok(())
 }
 
-/// Call the Anthropic Claude API with the image and prompt, returning adjustment parameter overrides.
+/// Validate the full LLM response object (new schema with adjustments + masks).
+fn validate_response(response: &Value) -> Result<()> {
+    if !response.is_object() {
+        return Err(anyhow!("LLM response must be a JSON object"));
+    }
+
+    // Validate global adjustments
+    let adjustments = response
+        .get("adjustments")
+        .ok_or_else(|| anyhow!("Response missing 'adjustments' key"))?;
+    validate_adjustment_object(adjustments, "adjustments")?;
+
+    // Validate masks array (optional)
+    if let Some(masks) = response.get("masks") {
+        let masks_arr = masks
+            .as_array()
+            .ok_or_else(|| anyhow!("'masks' must be an array"))?;
+
+        if masks_arr.len() > 2 {
+            return Err(anyhow!("Too many masks returned (max 2)"));
+        }
+
+        for (i, mask) in masks_arr.iter().enumerate() {
+            let ctx = format!("masks[{}]", i);
+
+            // Validate mask type
+            let mask_type = mask
+                .get("type")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| anyhow!("{}: missing or invalid 'type' field", ctx))?;
+
+            match mask_type {
+                "ai-sky" | "ai-subject" | "ai-foreground" => {}
+                other => {
+                    return Err(anyhow!(
+                        "{}: unknown mask type '{}'. Must be ai-sky, ai-subject, or ai-foreground",
+                        ctx,
+                        other
+                    ))
+                }
+            }
+
+            // Validate mask adjustments
+            let mask_adj = mask
+                .get("adjustments")
+                .ok_or_else(|| anyhow!("{}: missing 'adjustments' field", ctx))?;
+            validate_adjustment_object(mask_adj, &format!("{}.adjustments", ctx))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Call the Anthropic Claude API with the image and prompt.
 ///
-/// The returned JSON object contains only the parameters that should change — callers should
-/// merge it on top of the existing adjustments rather than replacing them entirely.
+/// Returns a JSON object with the schema:
+/// ```json
+/// {
+///   "adjustments": { ...global parameter overrides... },
+///   "masks": [
+///     { "name": "Sky", "type": "ai-sky", "adjustments": { ... } }
+///   ]
+/// }
+/// ```
+/// Callers should merge `adjustments` on top of existing global adjustments,
+/// and append the `masks` entries as new MaskContainers.
 pub async fn invoke_llm_edit(
     image: &DynamicImage,
     user_prompt: &str,
@@ -139,7 +244,7 @@ pub async fn invoke_llm_edit(
     let resized = resize_for_llm(image);
     let image_b64 = image_to_jpeg_base64(&resized)?;
 
-    // Build a compact context summary of the relevant current numeric adjustments.
+    // Build a compact context summary of the current numeric adjustments.
     let context_keys = [
         "exposure",
         "contrast",
@@ -170,15 +275,23 @@ pub async fn invoke_llm_edit(
         }
     }
 
+    // Include current mask count so the LLM knows existing masks
+    let existing_mask_count = current_adjustments
+        .get("masks")
+        .and_then(|m| m.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+
     let user_content = format!(
-        "Current adjustment values (for context): {}\n\nEdit request: {}",
+        "Current adjustment values (for context): {}\nExisting masks: {}\n\nEdit request: {}",
         serde_json::to_string(&current_context).unwrap_or_default(),
+        existing_mask_count,
         user_prompt
     );
 
     let request_body = json!({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "system": SYSTEM_PROMPT,
         "messages": [{
             "role": "user",
@@ -235,7 +348,7 @@ pub async fn invoke_llm_edit(
         .and_then(|t| t.as_str())
         .ok_or_else(|| anyhow!("Unexpected Anthropic API response format"))?;
 
-    // Strip any accidental markdown code block wrapping the LLM might have added
+    // Strip any accidental markdown code block wrapping
     let cleaned = text
         .trim()
         .trim_start_matches("```json")
@@ -243,7 +356,7 @@ pub async fn invoke_llm_edit(
         .trim_end_matches("```")
         .trim();
 
-    let adjustments: Value = serde_json::from_str(cleaned).map_err(|e| {
+    let result: Value = serde_json::from_str(cleaned).map_err(|e| {
         anyhow!(
             "Failed to parse LLM response as JSON: {}. Raw response: {}",
             e,
@@ -251,7 +364,7 @@ pub async fn invoke_llm_edit(
         )
     })?;
 
-    validate_adjustments(&adjustments)?;
+    validate_response(&result)?;
 
-    Ok(adjustments)
+    Ok(result)
 }
