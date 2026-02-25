@@ -15,8 +15,6 @@ CRITICAL: Respond ONLY with a valid JSON object. No explanation, no markdown cod
 
 ## Response Schema
 
-Your response must follow this exact schema:
-
 ```
 {
   "adjustments": { ...global adjustment overrides... },
@@ -51,34 +49,49 @@ Global adjustments applied to the entire image. Only include parameters you want
 
 ### "masks" (optional array, default [])
 Use masks when different regions of the image need SIGNIFICANTLY DIFFERENT adjustments.
-Common use cases:
-- Sky vs foreground: different exposure, temperature, saturation
-- Portrait subject vs background: selective sharpening, exposure, color
-- Foreground vs background: different haze/clarity treatment
+IMPORTANT: Only add masks when they genuinely improve the result. Max 3 masks per response.
 
-Each mask object:
+Each mask is one of two types:
+
+**Type A — Semantic AI mask** (whole-image semantic segmentation, no coordinates needed):
 ```
 {
   "name": "descriptive name",
   "type": "ai-sky" | "ai-subject" | "ai-foreground",
-  "adjustments": { ...same parameters as global, excluding vignetteAmount/grainAmount/glowAmount/halationAmount/toneMapper... }
+  "adjustments": { ...adjustment parameters... }
 }
 ```
+- "ai-sky": sky and clouds — for landscapes, seascapes, cityscapes
+- "ai-subject": main subject (person, animal, key object) — for portraits, wildlife, product
+- "ai-foreground": everything in front of the sky — for landscape foregrounds
 
-Mask types:
-- "ai-sky": detects sky and clouds — use for blue sky, sunset sky, overcast sky
-- "ai-subject": detects the main subject (person, animal, object) — use for portraits, wildlife
-- "ai-foreground": detects everything in front of the sky — use for landscapes, cityscapes
+**Type B — SAM bounding-box mask** (use SAM neural network to precisely segment ANY specific object or region):
+```
+{
+  "name": "descriptive name",
+  "type": "sam-box",
+  "bbox": { "x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0 },
+  "adjustments": { ...adjustment parameters... }
+}
+```
+- bbox coordinates are NORMALIZED 0.0–1.0 (x1,y1 = top-left; x2,y2 = bottom-right)
+- Use "sam-box" for SPECIFIC objects that ai-sky/ai-subject/ai-foreground cannot isolate:
+  cars, buildings, mountains, water, faces, clothing, specific people in a group, animals, trees, etc.
+- Estimate the bounding box by carefully looking at where the object is in the image
+- The SAM neural network will precisely refine the pixels within your bounding box
 
-IMPORTANT: Only add masks when they add real value. Do NOT add masks for uniform edits. Max 2 masks per response.
+Mask adjustments support: exposure, contrast, highlights, shadows, whites, blacks, brightness, temperature, tint, saturation, vibrance, clarity, dehaze, sharpness, lumaNoiseReduction, colorNoiseReduction
 
 ## Examples
 
-Example 1 — "dramatic landscape with moody sky" (masks are valuable here):
-{"adjustments":{"contrast":20,"highlights":-20,"shadows":15,"vibrance":25,"clarity":10,"vignetteAmount":-25,"toneMapper":"agx"},"masks":[{"name":"Sky","type":"ai-sky","adjustments":{"highlights":-50,"contrast":30,"saturation":20,"temperature":-15}},{"name":"Foreground","type":"ai-foreground","adjustments":{"shadows":25,"clarity":15,"temperature":10}}]}
+"dramatic landscape, moody sky, warm foreground":
+{"adjustments":{"contrast":15,"vignetteAmount":-20,"toneMapper":"agx"},"masks":[{"name":"Sky","type":"ai-sky","adjustments":{"highlights":-50,"contrast":35,"temperature":-20,"saturation":25}},{"name":"Foreground","type":"ai-foreground","adjustments":{"shadows":20,"temperature":15,"clarity":10}}]}
 
-Example 2 — "portrait, clean and bright" (no mask needed):
-{"adjustments":{"exposure":0.5,"highlights":-20,"shadows":15,"temperature":10,"vibrance":15,"sharpness":30},"masks":[]}"#;
+"make the red car pop against a desaturated background" (car is roughly center-right):
+{"adjustments":{"saturation":-40},"masks":[{"name":"Red Car","type":"sam-box","bbox":{"x1":0.45,"y1":0.3,"x2":0.9,"y2":0.8},"adjustments":{"saturation":60,"vibrance":30,"clarity":15}}]}
+
+"bright and clean portrait, no mask needed":
+{"adjustments":{"exposure":0.4,"highlights":-15,"shadows":20,"temperature":8,"vibrance":15,"sharpness":25},"masks":[]}"#;
 
 /// Resize image so its longest dimension is at most MAX_IMAGE_DIM, preserving aspect ratio.
 fn resize_for_llm(img: &DynamicImage) -> DynamicImage {
@@ -187,8 +200,8 @@ fn validate_response(response: &Value) -> Result<()> {
             .as_array()
             .ok_or_else(|| anyhow!("'masks' must be an array"))?;
 
-        if masks_arr.len() > 2 {
-            return Err(anyhow!("Too many masks returned (max 2)"));
+        if masks_arr.len() > 3 {
+            return Err(anyhow!("Too many masks returned (max 3)"));
         }
 
         for (i, mask) in masks_arr.iter().enumerate() {
@@ -202,9 +215,45 @@ fn validate_response(response: &Value) -> Result<()> {
 
             match mask_type {
                 "ai-sky" | "ai-subject" | "ai-foreground" => {}
+                "sam-box" => {
+                    // Validate bounding box
+                    let bbox = mask
+                        .get("bbox")
+                        .and_then(|b| b.as_object())
+                        .ok_or_else(|| anyhow!("{}: sam-box requires a 'bbox' object", ctx))?;
+
+                    for coord in ["x1", "y1", "x2", "y2"] {
+                        let val = bbox
+                            .get(coord)
+                            .and_then(|v| v.as_f64())
+                            .ok_or_else(|| {
+                                anyhow!("{}.bbox.{}: must be a number", ctx, coord)
+                            })?;
+                        if !(0.0..=1.0).contains(&val) {
+                            return Err(anyhow!(
+                                "{}.bbox.{}: value {} must be between 0.0 and 1.0",
+                                ctx,
+                                coord,
+                                val
+                            ));
+                        }
+                    }
+
+                    let x1 = bbox["x1"].as_f64().unwrap();
+                    let y1 = bbox["y1"].as_f64().unwrap();
+                    let x2 = bbox["x2"].as_f64().unwrap();
+                    let y2 = bbox["y2"].as_f64().unwrap();
+
+                    if x2 <= x1 || y2 <= y1 {
+                        return Err(anyhow!(
+                            "{}.bbox: x2 must be > x1 and y2 must be > y1",
+                            ctx
+                        ));
+                    }
+                }
                 other => {
                     return Err(anyhow!(
-                        "{}: unknown mask type '{}'. Must be ai-sky, ai-subject, or ai-foreground",
+                        "{}: unknown mask type '{}'. Must be ai-sky, ai-subject, ai-foreground, or sam-box",
                         ctx,
                         other
                     ))
@@ -291,7 +340,7 @@ pub async fn invoke_llm_edit(
 
     let request_body = json!({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 2048,
+        "max_tokens": 3000,
         "system": SYSTEM_PROMPT,
         "messages": [{
             "role": "user",

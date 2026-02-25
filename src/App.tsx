@@ -2287,40 +2287,91 @@ function App() {
     if (!selectedImage || isLlmEditing) return;
     setIsLlmEditing(true);
     try {
-      const response: { adjustments: Partial<Adjustments>; masks?: Array<{ name: string; type: string; adjustments: any }> } =
-        await invoke(Invokes.InvokeLlmEdit, {
-          prompt,
-          currentAdjustments: adjustments,
-        });
+      const response: {
+        adjustments: Partial<Adjustments>;
+        masks?: Array<{
+          name: string;
+          type: string;
+          bbox?: { x1: number; y1: number; x2: number; y2: number };
+          adjustments: any;
+        }>;
+      } = await invoke(Invokes.InvokeLlmEdit, {
+        prompt,
+        currentAdjustments: adjustments,
+      });
 
-      const maskTypeToEnum: Record<string, Mask> = {
+      const semanticMaskTypeToEnum: Record<string, Mask> = {
         'ai-sky': Mask.AiSky,
         'ai-subject': Mask.AiSubject,
         'ai-foreground': Mask.AiForeground,
       };
 
+      // For sam-box masks, call SAM in parallel to get pixel-precise mask data.
+      const masksWithSamParams = await Promise.all(
+        (response.masks ?? []).map(async (m) => {
+          if (m.type === 'sam-box' && m.bbox) {
+            try {
+              const samParams = await invoke(Invokes.GenerateAiSubjectMask, {
+                jsAdjustments: adjustments,
+                endPoint: [m.bbox.x2, m.bbox.y2],
+                flipHorizontal: adjustments.flipHorizontal,
+                flipVertical: adjustments.flipVertical,
+                orientationSteps: adjustments.orientationSteps,
+                path: selectedImage.path,
+                rotation: adjustments.rotation,
+                startPoint: [m.bbox.x1, m.bbox.y1],
+              });
+              return { ...m, samParams };
+            } catch {
+              // SAM failed — still create the mask but without pre-computed data
+              return { ...m, samParams: null };
+            }
+          }
+          return { ...m, samParams: null };
+        })
+      );
+
       setAdjustments((prev: Adjustments) => {
-        const newMaskContainers: MaskContainer[] = (response.masks ?? [])
-          .filter((m) => maskTypeToEnum[m.type])
-          .map((m) => ({
-            ...INITIAL_MASK_CONTAINER,
-            id: crypto.randomUUID(),
-            name: m.name,
-            adjustments: {
-              ...INITIAL_MASK_ADJUSTMENTS,
-              ...m.adjustments,
-            },
-            subMasks: [
-              {
-                id: crypto.randomUUID(),
+        const newMaskContainers: MaskContainer[] = masksWithSamParams
+          .map((m) => {
+            const subMaskId = crypto.randomUUID();
+            let subMask: SubMask;
+
+            if (m.type === 'sam-box') {
+              subMask = {
+                id: subMaskId,
                 invert: false,
                 mode: SubMaskMode.Additive,
                 opacity: 100,
-                type: maskTypeToEnum[m.type],
+                type: Mask.AiSubject,
                 visible: true,
-              } as SubMask,
-            ],
-          }));
+                parameters: m.samParams ?? undefined,
+              } as SubMask;
+            } else if (semanticMaskTypeToEnum[m.type]) {
+              subMask = {
+                id: subMaskId,
+                invert: false,
+                mode: SubMaskMode.Additive,
+                opacity: 100,
+                type: semanticMaskTypeToEnum[m.type],
+                visible: true,
+              } as SubMask;
+            } else {
+              return null;
+            }
+
+            return {
+              ...INITIAL_MASK_CONTAINER,
+              id: crypto.randomUUID(),
+              name: m.name,
+              adjustments: {
+                ...INITIAL_MASK_ADJUSTMENTS,
+                ...m.adjustments,
+              },
+              subMasks: [subMask],
+            } as MaskContainer;
+          })
+          .filter((m): m is MaskContainer => m !== null);
 
         return {
           ...prev,
