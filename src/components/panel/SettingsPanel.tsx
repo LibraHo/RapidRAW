@@ -1345,13 +1345,18 @@ export default function SettingsPanel({
 
                 <div className="p-6 bg-surface rounded-xl shadow-md">
                   <h2 className="text-xl font-semibold mb-2 text-accent">AI Edit Assistant</h2>
-                  <p className="text-sm text-text-secondary mb-6">
+                  <p className="text-sm text-text-secondary mb-4">
                     Describe the look you want in plain language and Claude will generate adjustment parameters for your photo. Requires an Anthropic API key.
                   </p>
+                  <div className="mb-6 p-3 bg-bg-primary rounded-lg border border-border-color text-xs text-text-secondary space-y-1">
+                    <p className="font-medium text-text-primary">Privacy notice</p>
+                    <p>When you use AI Edit, a resized preview of your photo (≤1024 px) is sent to <span className="font-mono">api.anthropic.com</span> together with your prompt. No full-resolution image data leaves your device. Anthropic does not use API inputs to train models by default — see their privacy policy for details.</p>
+                    <p>Your API key is stored in plain text in the application settings file. Do not share your settings file with others.</p>
+                  </div>
                   <div className="space-y-6">
                     <SettingItem
                       label="Anthropic API Key"
-                      description="Your Anthropic API key is stored locally and only sent to api.anthropic.com. Get one at console.anthropic.com."
+                      description="Get a key at console.anthropic.com. Usage is billed per request at Anthropic's standard rates."
                     >
                       <Input
                         id="llm-api-key"

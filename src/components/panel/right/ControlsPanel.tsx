@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { RotateCcw, Copy, ClipboardPaste, Aperture, Sparkles, Send, X } from 'lucide-react';
+import { RotateCcw, Copy, ClipboardPaste, Aperture, Sparkles, Send, X, Cloud } from 'lucide-react';
 import BasicAdjustments from '../../adjustments/Basic';
 import CurveGraph from '../../adjustments/Curves';
 import ColorPanel from '../../adjustments/Color';
@@ -235,22 +235,28 @@ export default function Controls({
               rows={2}
               value={aiPrompt}
             />
-            <div className="flex gap-2 justify-end">
-              <button
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface transition-colors"
-                onClick={() => { setIsAiInputOpen(false); setAiPrompt(''); }}
-              >
-                <X size={13} />
-                Cancel
-              </button>
-              <button
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-accent text-button-text disabled:opacity-50 disabled:cursor-not-allowed transition-colors hover:opacity-90"
-                disabled={!aiPrompt.trim() || isLlmEditing}
-                onClick={handleAiEditSubmit}
-              >
-                <Send size={13} />
-                {isLlmEditing ? 'Applying…' : 'Apply'}
-              </button>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-xs text-text-secondary opacity-60" data-tooltip="A resized preview is sent to api.anthropic.com">
+                <Cloud size={11} />
+                Powered by Claude
+              </span>
+              <div className="flex gap-2">
+                <button
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface transition-colors"
+                  onClick={() => { setIsAiInputOpen(false); setAiPrompt(''); }}
+                >
+                  <X size={13} />
+                  Cancel
+                </button>
+                <button
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-accent text-button-text disabled:opacity-50 disabled:cursor-not-allowed transition-colors hover:opacity-90"
+                  disabled={!aiPrompt.trim() || isLlmEditing}
+                  onClick={handleAiEditSubmit}
+                >
+                  <Send size={13} />
+                  {isLlmEditing ? 'Applying…' : 'Apply'}
+                </button>
+              </div>
             </div>
           </div>
         )}
